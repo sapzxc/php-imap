@@ -198,7 +198,6 @@ abstract class Protocol implements ProtocolInterface {
             $options['ssl']['peer_name'] = $this->getPeerName();
         }
 
-var_dump($options);
         return $options;
     }
 
