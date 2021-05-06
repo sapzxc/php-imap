@@ -49,6 +49,12 @@ abstract class Protocol implements ProtocolInterface {
     protected $cert_validation = true;
 
     /**
+     * Peer name for fix SSL checks when connecting by IP
+     * @var null|string
+     */
+    protected $peer_name = null;
+
+    /**
      * Proxy settings
      * @var array
      */
@@ -119,6 +125,22 @@ abstract class Protocol implements ProtocolInterface {
     }
 
     /**
+     * @param $peer_name
+     * @return $this
+     */
+    public function setPeerName($peer_name) {
+        $this->peer_name = $peer_name;
+        return $this;
+    }
+
+    /**
+     * @return string|null
+     */
+    public function getPeerName() {
+        return $this->peer_name;
+    }
+
+    /**
      * Set connection proxy settings
      * @var array $options
      *
@@ -171,6 +193,12 @@ abstract class Protocol implements ProtocolInterface {
             }
         }
 
+        if($this->peer_name)
+        {
+            $options['ssl']['peer_name'] = $this->getPeerName();
+        }
+
+var_dump($options);
         return $options;
     }
 
@@ -194,7 +222,7 @@ abstract class Protocol implements ProtocolInterface {
         stream_set_timeout($stream, $timeout);
 
         if (!$stream) {
-            throw new ConnectionFailedException("Failed to connect to host", 0, $error);
+            throw new ConnectionFailedException("Failed to connect to host", 0);
         }
 
         if (false === stream_set_timeout($stream, $timeout)) {

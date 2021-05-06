@@ -367,7 +367,8 @@ class Query {
             $old_page = $this->page;
 
             $this->limit = $chunk_size;
-            $this->page = $start_chunk;
+            $this->page = $start_chunk - 1;
+
             while ($this->limit * $this->page <= $available_messages_count) {
                 $messages = $this->populate($available_messages);
                 $callback($messages, $this->page);

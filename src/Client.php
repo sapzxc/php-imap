@@ -73,6 +73,13 @@ class Client {
     public $encryption;
 
     /**
+     * Peer name for SSL checks when connecting using IP
+     *
+     * @var null|string
+     */
+    public $peer_name;
+
+    /**
      * If server has to validate cert.
      *
      * @var bool
@@ -148,6 +155,7 @@ class Client {
         'port' => 993,
         'protocol'  => 'imap',
         'encryption' => 'ssl',
+        'peer_name' => null,
         'validate_cert' => true,
         'username' => '',
         'password' => '',
@@ -335,6 +343,7 @@ class Client {
             $this->connection = new ImapProtocol($this->validate_cert, $this->encryption);
             $this->connection->setConnectionTimeout($this->timeout);
             $this->connection->setProxy($this->proxy);
+            $this->connection->setPeerName($this->peer_name);
         }else{
             if (extension_loaded('imap') === false) {
                 throw new ConnectionFailedException("connection setup failed", 0, new ProtocolNotSupportedException($protocol." is an unsupported protocol"));

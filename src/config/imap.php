@@ -51,6 +51,7 @@ return [
             'port'  => 993,
             'protocol'  => 'imap', //might also use imap, [pop3 or nntp (untested)]
             'encryption'    => 'ssl', // Supported: false, 'ssl', 'tls'
+            'peer_name'     => null, // peer name when connecting using IP
             'validate_cert' => true,
             'username' => 'root@example.com',
             'password' => '',
