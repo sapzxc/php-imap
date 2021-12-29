@@ -13,7 +13,6 @@
 namespace Webklex\PHPIMAP;
 
 use ErrorException;
-use Exception;
 use Webklex\PHPIMAP\Connection\Protocols\ImapProtocol;
 use Webklex\PHPIMAP\Connection\Protocols\LegacyProtocol;
 use Webklex\PHPIMAP\Connection\Protocols\Protocol;
@@ -66,7 +65,7 @@ class Client {
 
     /**
      * Server encryption.
-     * Supported: none, ssl, tls, or notls.
+     * Supported: none, ssl, tls, starttls or notls.
      *
      * @var string
      */
@@ -118,6 +117,13 @@ class Client {
     public $password;
 
     /**
+     * Additional data fetched from the server.
+     *
+     * @var string
+     */
+    public $extensions;
+
+    /**
      * Account authentication method.
      *
      * @var string
@@ -160,6 +166,7 @@ class Client {
         'username' => '',
         'password' => '',
         'authentication' => null,
+        "extensions" => [],
         'proxy' => [
             'socket' => null,
             'request_fulluri' => false,
@@ -339,7 +346,7 @@ class Client {
         $this->disconnect();
         $protocol = strtolower($this->protocol);
 
-        if ($protocol == "imap") {
+        if (in_array($protocol, ['imap', 'imap4', 'imap4rev1'])) {
             $this->connection = new ImapProtocol($this->validate_cert, $this->encryption);
             $this->connection->setConnectionTimeout($this->timeout);
             $this->connection->setProxy($this->proxy);
@@ -353,6 +360,10 @@ class Client {
                 $protocol = substr($protocol, 7);
             }
             $this->connection->setProtocol($protocol);
+        }
+
+        if (ClientManager::get('options.debug')) {
+            $this->connection->enableDebug();
         }
 
         try {
@@ -381,7 +392,7 @@ class Client {
             } elseif (!$this->connection->login($this->username, $this->password)) {
                 throw new AuthFailedException();
             }
-        } catch (Exception $e) {
+        } catch (AuthFailedException $e) {
             throw new ConnectionFailedException("connection setup failed", 0, $e);
         }
     }
@@ -553,6 +564,21 @@ class Client {
      */
     public function getFolderPath(){
         return $this->active_folder;
+    }
+
+    /**
+     * Exchange identification information
+     * Ref.: https://datatracker.ietf.org/doc/html/rfc2971
+     *
+     * @param null|array $ids
+     * @return array|bool|void|null
+     *
+     * @throws ConnectionFailedException
+     * @throws Exceptions\RuntimeException
+     */
+    public function Id($ids = null) {
+        $this->checkConnection();
+        return $this->connection->ID($ids);
     }
 
     /**

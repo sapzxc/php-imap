@@ -62,7 +62,7 @@ class WhereQuery extends Query {
         'OR', 'AND',
         'ALL', 'ANSWERED', 'BCC', 'BEFORE', 'BODY', 'CC', 'DELETED', 'FLAGGED', 'FROM', 'KEYWORD',
         'NEW', 'NOT', 'OLD', 'ON', 'RECENT', 'SEEN', 'SINCE', 'SUBJECT', 'TEXT', 'TO',
-        'UNANSWERED', 'UNDELETED', 'UNFLAGGED', 'UNKEYWORD', 'UNSEEN'
+        'UNANSWERED', 'UNDELETED', 'UNFLAGGED', 'UNKEYWORD', 'UNSEEN', 'UID'
     ];
 
     /**
@@ -105,44 +105,65 @@ class WhereQuery extends Query {
      * @throws InvalidWhereQueryCriteriaException
      */
     protected function validate_criteria($criteria) {
-        $criteria = strtoupper($criteria);
-        if (substr($criteria, 0, 7) === "CUSTOM ") {
+        $command = strtoupper($criteria);
+        if (substr($command, 0, 7) === "CUSTOM ") {
             return substr($criteria, 7);
         }
-        if (in_array($criteria, $this->available_criteria) === false) {
-            throw new InvalidWhereQueryCriteriaException();
+        if (in_array($command, $this->available_criteria) === false) {
+            throw new InvalidWhereQueryCriteriaException("Invalid imap search criteria: $command");
         }
 
         return $criteria;
     }
 
     /**
+     * Register search parameters
      * @param mixed $criteria
      * @param null $value
      *
      * @return $this
      * @throws InvalidWhereQueryCriteriaException
+     *
+     * Examples:
+     * $query->from("someone@email.tld")->seen();
+     * $query->whereFrom("someone@email.tld")->whereSeen();
+     * $query->where([["FROM" => "someone@email.tld"], ["SEEN"]]);
+     * $query->where(["FROM" => "someone@email.tld"])->where(["SEEN"]);
+     * $query->where(["FROM" => "someone@email.tld", "SEEN"]);
+     * $query->where("FROM", "someone@email.tld")->where("SEEN");
      */
     public function where($criteria, $value = null) {
         if (is_array($criteria)) {
             foreach ($criteria as $key => $value) {
                 if (is_numeric($key)) {
-                    return $this->where($value);
+                    $this->where($value);
+                }else{
+                    $this->where($key, $value);
                 }
-                return $this->where($key, $value);
             }
         } else {
-            $criteria = $this->validate_criteria($criteria);
-            $value = $this->parse_value($value);
-
-            if ($value === null || $value === '') {
-                $this->query->push([$criteria]);
-            } else {
-                $this->query->push([$criteria, $value]);
-            }
+            $this->push_search_criteria($criteria, $value);
         }
 
         return $this;
+    }
+
+    /**
+     * Push a given search criteria and value pair to the search query
+     * @param $criteria string
+     * @param $value mixed
+     *
+     * @throws InvalidWhereQueryCriteriaException
+     */
+    protected function push_search_criteria($criteria, $value){
+        $criteria = $this->validate_criteria($criteria);
+        $value = $this->parse_value($value);
+
+        if ($value === null || $value === '') {
+            $this->query->push([$criteria]);
+        } else {
+            $this->query->push([$criteria, $value]);
+        }
     }
 
     /**
@@ -458,5 +479,68 @@ class WhereQuery extends Query {
      */
     public function whereLanguage($country_code) {
         return $this->where("Content-Language $country_code");
+    }
+
+    /**
+     * Get message be it UID.
+     *
+     * @param int|string $uid
+     *
+     * @return WhereQuery
+     * @throws InvalidWhereQueryCriteriaException
+     */
+    public function whereUid($uid) {
+        return $this->where('UID', $uid);
+    }
+
+    /**
+     * Get messages by their UIDs.
+     *
+     * @param array<int, int> $uids
+     *
+     * @return WhereQuery
+     * @throws InvalidWhereQueryCriteriaException
+     */
+    public function whereUidIn($uids) {
+        $uids = implode(',', $uids);
+        return $this->where('UID', $uids);
+    }
+
+    /**
+     * Apply the callback if the given "value" is truthy.
+     * copied from @url https://github.com/laravel/framework/blob/8.x/src/Illuminate/Support/Traits/Conditionable.php
+     *
+     * @param mixed $value
+     * @param callable $callback
+     * @param callable|null $default
+     * @return $this|mixed
+     */
+    public function when($value, $callback, $default = null) {
+        if ($value) {
+            return $callback($this, $value) ?: $this;
+        } elseif ($default) {
+            return $default($this, $value) ?: $this;
+        }
+
+        return $this;
+    }
+
+    /**
+     * Apply the callback if the given "value" is falsy.
+     * copied from @url https://github.com/laravel/framework/blob/8.x/src/Illuminate/Support/Traits/Conditionable.php
+     *
+     * @param mixed $value
+     * @param callable $callback
+     * @param callable|null $default
+     * @return $this|mixed
+     */
+    public function unless($value, $callback, $default = null) {
+        if (!$value) {
+            return $callback($this, $value) ?: $this;
+        } elseif ($default) {
+            return $default($this, $value) ?: $this;
+        }
+
+        return $this;
     }
 }

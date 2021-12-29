@@ -46,8 +46,8 @@ class Query {
     /** @var string $raw_query */
     protected $raw_query;
 
-    /** @var string $charset */
-    protected $charset;
+    /** @var string[] $extensions */
+    protected $extensions;
 
     /** @var Client $client */
     protected $client;
@@ -67,7 +67,7 @@ class Query {
     /** @var int $fetch_flags */
     protected $fetch_flags = true;
 
-    /** @var int $sequence */
+    /** @var int|string $sequence */
     protected $sequence = IMAP::NIL;
 
     /** @var string $fetch_order */
@@ -85,9 +85,9 @@ class Query {
     /**
      * Query constructor.
      * @param Client $client
-     * @param string $charset
+     * @param string[] $extensions
      */
-    public function __construct(Client $client, $charset = 'UTF-8') {
+    public function __construct(Client $client, $extensions = []) {
         $this->setClient($client);
 
         $this->sequence = ClientManager::get('options.sequence', IMAP::ST_MSGN);
@@ -102,7 +102,7 @@ class Query {
         $this->date_format = ClientManager::get('date_format', 'd M y');
         $this->soft_fail = ClientManager::get('options.soft_fail', false);
 
-        $this->charset = $charset;
+        $this->setExtensions($extensions);
         $this->query = new Collection();
         $this->boot();
     }
@@ -162,7 +162,11 @@ class Query {
                 if ($statement[1] === null) {
                     $query .= $statement[0];
                 } else {
-                    $query .= $statement[0] . ' "' . $statement[1] . '"';
+                    if (is_numeric($statement[1])) {
+                        $query .= $statement[0] . ' ' . $statement[1];
+                    } else {
+                        $query .= $statement[0] . ' "' . $statement[1] . '"';
+                    }
                 }
             }
             $query .= ' ';
@@ -184,8 +188,8 @@ class Query {
         $this->generate_query();
 
         try {
-            $available_messages = $this->client->getConnection()->search([$this->getRawQuery()], $this->sequence == IMAP::ST_UID);
-            return new Collection($available_messages);
+            $available_messages = $this->client->getConnection()->search([$this->getRawQuery()], $this->sequence);
+            return $available_messages !== false ? new Collection($available_messages) : new Collection();
         } catch (RuntimeException $e) {
             throw new GetMessagesFailedException("failed to fetch messages", 0, $e);
         } catch (ConnectionFailedException $e) {
@@ -217,19 +221,24 @@ class Query {
         }
 
         $uids = $available_messages->forPage($this->page, $this->limit)->toArray();
-        $flags = $this->client->getConnection()->flags($uids, $this->sequence == IMAP::ST_UID);
-        $headers = $this->client->getConnection()->headers($uids, "RFC822", $this->sequence == IMAP::ST_UID);
+        $extensions = [];
+        if (empty($this->getExtensions()) === false) {
+            $extensions = $this->client->getConnection()->fetch($this->getExtensions(), $uids, null, $this->sequence);
+        }
+        $flags = $this->client->getConnection()->flags($uids, $this->sequence);
+        $headers = $this->client->getConnection()->headers($uids, "RFC822", $this->sequence);
 
         $contents = [];
         if ($this->getFetchBody()) {
-            $contents = $this->client->getConnection()->content($uids, "RFC822", $this->sequence == IMAP::ST_UID);
+            $contents = $this->client->getConnection()->content($uids, "RFC822", $this->sequence);
         }
 
         return [
-            "uids"     => $uids,
-            "flags"    => $flags,
-            "headers"  => $headers,
-            "contents" => $contents,
+            "uids"       => $uids,
+            "flags"      => $flags,
+            "headers"    => $headers,
+            "contents"   => $contents,
+            "extensions" => $extensions,
         ];
     }
 
@@ -247,18 +256,18 @@ class Query {
      * @throws GetMessagesFailedException
      * @throws ReflectionException
      */
-    protected function make($uid, $msglist, $header, $content, $flags){
+    protected function make($uid, $msglist, $header, $content, $flags) {
         try {
             return Message::make($uid, $msglist, $this->getClient(), $header, $content, $flags, $this->getFetchOptions(), $this->sequence);
-        }catch (MessageNotFoundException $e) {
+        } catch (MessageNotFoundException $e) {
             $this->setError($uid, $e);
-        }catch (RuntimeException $e) {
+        } catch (RuntimeException $e) {
             $this->setError($uid, $e);
-        }catch (MessageFlagException $e) {
+        } catch (MessageFlagException $e) {
             $this->setError($uid, $e);
-        }catch (InvalidMessageDateException $e) {
+        } catch (InvalidMessageDateException $e) {
             $this->setError($uid, $e);
-        }catch (MessageContentFetchingException $e) {
+        } catch (MessageContentFetchingException $e) {
             $this->setError($uid, $e);
         }
 
@@ -275,7 +284,7 @@ class Query {
      *
      * @return string
      */
-    protected function getMessageKey($message_key, $msglist, $message){
+    protected function getMessageKey($message_key, $msglist, $message) {
         switch ($message_key) {
             case 'number':
                 $key = $message->getMessageNo();
@@ -317,8 +326,12 @@ class Query {
         foreach ($raw_messages["headers"] as $uid => $header) {
             $content = isset($raw_messages["contents"][$uid]) ? $raw_messages["contents"][$uid] : "";
             $flag = isset($raw_messages["flags"][$uid]) ? $raw_messages["flags"][$uid] : [];
+            $extensions = isset($raw_messages["extensions"][$uid]) ? $raw_messages["extensions"][$uid] : [];
 
             $message = $this->make($uid, $msglist, $header, $content, $flag);
+            foreach($extensions as $key => $extension) {
+                $message->getHeader()->set($key, $extension);
+            }
             if ($message !== null) {
                 $key = $this->getMessageKey($message_key, $msglist, $message);
                 $messages->put("$key", $message);
@@ -339,7 +352,7 @@ class Query {
         $available_messages = $this->search();
 
         try {
-            if (($available_messages_count = $available_messages->count()) > 0) {
+            if ($available_messages->count() > 0) {
                 return $this->populate($available_messages);
             }
             return MessageCollection::make([]);
@@ -367,13 +380,12 @@ class Query {
             $old_page = $this->page;
 
             $this->limit = $chunk_size;
-            $this->page = $start_chunk - 1;
-
-            while ($this->limit * $this->page <= $available_messages_count) {
+            $this->page = $start_chunk;
+            do {
                 $messages = $this->populate($available_messages);
                 $callback($messages, $this->page);
                 $this->page++;
-            }
+            } while ($this->limit * $this->page <= $available_messages_count);
             $this->limit = $old_limit;
             $this->page = $old_page;
         }
@@ -408,7 +420,7 @@ class Query {
      * Get a new Message instance
      * @param int $uid
      * @param int|null $msglist
-     * @param int|null $sequence
+     * @param int|string|null $sequence
      *
      * @return Message
      * @throws ConnectionFailedException
@@ -490,9 +502,18 @@ class Query {
      * @return $this
      */
     public function setSequence($sequence) {
-        $this->sequence = $sequence != IMAP::ST_MSGN ? IMAP::ST_UID : $sequence;
+        $this->sequence = $sequence;
 
         return $this;
+    }
+
+    /**
+     * Get the sequence type
+     *
+     * @return int|string
+     */
+    public function getSequence() {
+        return $this->sequence;
     }
 
     /**
@@ -551,18 +572,23 @@ class Query {
     }
 
     /**
-     * @return string
+     * @return string[]
      */
-    public function getCharset() {
-        return $this->charset;
+    public function getExtensions() {
+        return $this->extensions;
     }
 
     /**
-     * @param string $charset
+     * @param string[] $extensions
      * @return Query
      */
-    public function setCharset($charset) {
-        $this->charset = $charset;
+    public function setExtensions($extensions) {
+        $this->extensions = $extensions;
+        if (count($this->extensions) > 0) {
+            if (in_array("UID", $this->extensions) === false) {
+                $this->extensions[] = "UID";
+            }
+        }
         return $this;
     }
 
@@ -729,18 +755,18 @@ class Query {
     }
 
     /**
+     * @return Query
      * @var boolean $state
      *
-     * @return Query
      */
     public function softFail($state = true) {
         return $this->setSoftFail($state);
     }
 
     /**
+     * @return Query
      * @var boolean $state
      *
-     * @return Query
      */
     public function setSoftFail($state = true) {
         $this->soft_fail = $state;
@@ -779,11 +805,11 @@ class Query {
 
     /**
      * Check if there are any errors / exceptions present
+     * @return boolean
      * @var integer|null $uid
      *
-     * @return boolean
      */
-    public function hasErrors($uid = null){
+    public function hasErrors($uid = null) {
         if ($uid !== null) {
             return $this->hasError($uid);
         }
@@ -792,11 +818,11 @@ class Query {
 
     /**
      * Check if there is an error / exception present
+     * @return boolean
      * @var integer $uid
      *
-     * @return boolean
      */
-    public function hasError($uid){
+    public function hasError($uid) {
         return isset($this->errors[$uid]);
     }
 
@@ -805,7 +831,7 @@ class Query {
      *
      * @return array
      */
-    public function errors(){
+    public function errors() {
         return $this->getErrors();
     }
 
@@ -814,27 +840,27 @@ class Query {
      *
      * @return array
      */
-    public function getErrors(){
+    public function getErrors() {
         return $this->errors;
     }
 
     /**
      * Get a specific error / exception
+     * @return Exception|null
      * @var integer $uid
      *
-     * @return Exception|null
      */
-    public function error($uid){
+    public function error($uid) {
         return $this->getError($uid);
     }
 
     /**
      * Get a specific error / exception
+     * @return Exception|null
      * @var integer $uid
      *
-     * @return Exception|null
      */
-    public function getError($uid){
+    public function getError($uid) {
         if ($this->hasError($uid)) {
             return $this->errors[$uid];
         }

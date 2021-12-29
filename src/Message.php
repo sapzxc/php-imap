@@ -681,9 +681,9 @@ class Message {
                 return base64_decode($string);
             case IMAP::MESSAGE_ENC_BASE64:
                 return base64_decode($string);
-            case IMAP::MESSAGE_ENC_8BIT:
             case IMAP::MESSAGE_ENC_QUOTED_PRINTABLE:
                 return quoted_printable_decode($string);
+            case IMAP::MESSAGE_ENC_8BIT:
             case IMAP::MESSAGE_ENC_7BIT:
             case IMAP::MESSAGE_ENC_OTHER:
             default:
@@ -955,6 +955,8 @@ class Message {
     /**
      * Delete the current Message
      * @param bool $expunge
+     * @param string|null $trash_path
+     * @param boolean $force_move
      *
      * @return bool
      * @throws Exceptions\ConnectionFailedException
@@ -962,8 +964,12 @@ class Message {
      * @throws MessageFlagException
      * @throws Exceptions\RuntimeException
      */
-    public function delete($expunge = true) {
+    public function delete($expunge = true, $trash_path = null, $force_move = false) {
         $status = $this->setFlag("Deleted");
+        if($force_move) {
+            $trash_path = $trash_path === null ? $this->config["common_folders"]["trash"]: $trash_path;
+            $status = $this->move($trash_path);
+        }
         if($expunge) $this->client->expunge();
 
         $event = $this->getEvent("message", "deleted");
@@ -1263,6 +1269,15 @@ class Message {
         }
 
         throw new MaskNotFoundException("Unknown mask provided: ".$mask);
+    }
+
+    /**
+     * Get the message path aka folder path
+     *
+     * @return string
+     */
+    public function getFolderPath(){
+        return $this->folder_path;
     }
 
     /**

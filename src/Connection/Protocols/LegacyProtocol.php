@@ -51,7 +51,6 @@ class LegacyProtocol extends Protocol {
      * Save the information for a nw connection
      * @param string $host
      * @param null $port
-     * @param bool $encryption
      */
     public function connect($host, $port = null) {
         if ($this->encryption) {
@@ -72,6 +71,7 @@ class LegacyProtocol extends Protocol {
      *
      * @return bool
      * @throws AuthFailedException
+     * @throws RuntimeException
      */
     public function login($user, $password) {
         try {
@@ -79,7 +79,7 @@ class LegacyProtocol extends Protocol {
                 $this->getAddress(),
                 $user,
                 $password,
-                IMAP::OP_READONLY,
+                0,
                 $attempts = 3,
                 ClientManager::get('options.open')
             );
@@ -95,6 +95,15 @@ class LegacyProtocol extends Protocol {
             throw new AuthFailedException($message);
         }
 
+        $errors = \imap_errors();
+        if(is_array($errors)) {
+            $status = $this->examineFolder();
+            if($status['exists'] !== 0) {
+                $message = implode("; ", (is_array($errors) ? $errors : array()));
+                throw new RuntimeException($message);
+            }
+        }
+
         return $this->stream;
     }
 
@@ -103,8 +112,8 @@ class LegacyProtocol extends Protocol {
      * @param string $user username
      * @param string $token access token
      *
-     * @return bool|mixed
-     * @throws AuthFailedException
+     * @return bool|resource
+     * @throws AuthFailedException|RuntimeException
      */
     public function authenticate($user, $token) {
         return $this->login($user, $token);
@@ -138,7 +147,9 @@ class LegacyProtocol extends Protocol {
      */
     public function logout() {
         if ($this->stream) {
-            return \imap_close($this->stream, IMAP::CL_EXPUNGE);
+            $result = \imap_close($this->stream, IMAP::CL_EXPUNGE);
+            $this->stream = false;
+            return $result;
         }
         return false;
     }
@@ -149,7 +160,7 @@ class LegacyProtocol extends Protocol {
      * @return bool
      */
     public function connected(){
-        return !$this->stream;
+        return boolval($this->stream);
     }
 
     /**
@@ -177,7 +188,7 @@ class LegacyProtocol extends Protocol {
      * Examine a given folder
      * @param string $folder examine this folder
      *
-     * @return bool|array see examineOrselect()
+     * @return bool|array
      * @throws RuntimeException
      */
     public function examineFolder($folder = 'INBOX') {
@@ -199,15 +210,15 @@ class LegacyProtocol extends Protocol {
      * Fetch message content
      * @param array|int $uids
      * @param string $rfc
-     * @param bool $uid set to true if passing a unique id
+     * @param int $uid set to IMAP::ST_UID if you pass message unique identifiers instead of numbers.
      *
      * @return array
      */
-    public function content($uids, $rfc = "RFC822", $uid = false) {
+    public function content($uids, $rfc = "RFC822", $uid = IMAP::ST_UID) {
         $result = [];
         $uids = is_array($uids) ? $uids : [$uids];
-        foreach ($uids as $uid) {
-            $result[$uid] = \imap_fetchbody($this->stream, $uid, "", $uid ? IMAP::FT_UID : IMAP::NIL);
+        foreach ($uids as $id) {
+            $result[$id] = \imap_fetchbody($this->stream, $id, "", $uid ? IMAP::ST_UID : IMAP::NIL);
         }
         return $result;
     }
@@ -216,15 +227,15 @@ class LegacyProtocol extends Protocol {
      * Fetch message headers
      * @param array|int $uids
      * @param string $rfc
-     * @param bool $uid set to true if passing a unique id
+     * @param int $uid set to IMAP::ST_UID if you pass message unique identifiers instead of numbers.
      *
      * @return array
      */
-    public function headers($uids, $rfc = "RFC822", $uid = false){
+    public function headers($uids, $rfc = "RFC822", $uid = IMAP::ST_UID){
         $result = [];
         $uids = is_array($uids) ? $uids : [$uids];
-        foreach ($uids as $uid) {
-            $result[$uid] = \imap_fetchheader($this->stream, $uid, $uid ? IMAP::FT_UID : IMAP::NIL);
+        foreach ($uids as $id) {
+            $result[$id] = \imap_fetchheader($this->stream, $id, $uid ? IMAP::ST_UID : IMAP::NIL);
         }
         return $result;
     }
@@ -232,15 +243,15 @@ class LegacyProtocol extends Protocol {
     /**
      * Fetch message flags
      * @param array|int $uids
-     * @param bool $uid set to true if passing a unique id
+     * @param int $uid set to IMAP::ST_UID if you pass message unique identifiers instead of numbers.
      *
      * @return array
      */
-    public function flags($uids, $uid = false){
+    public function flags($uids, $uid = IMAP::ST_UID){
         $result = [];
         $uids = is_array($uids) ? $uids : [$uids];
-        foreach ($uids as $uid) {
-            $raw_flags = \imap_fetch_overview($this->stream, $uid, $uid ? IMAP::FT_UID : IMAP::NIL);
+        foreach ($uids as $id) {
+            $raw_flags = \imap_fetch_overview($this->stream, $id, $uid ? IMAP::ST_UID : IMAP::NIL);
             $flags = [];
             if (is_array($raw_flags) && isset($raw_flags[0])) {
                 $raw_flags = (array) $raw_flags[0];
@@ -287,12 +298,12 @@ class LegacyProtocol extends Protocol {
     /**
      * Get a message overview
      * @param string $sequence uid sequence
-     * @param bool $uid set to true if passing a unique id
+     * @param int $uid set to IMAP::ST_UID if you pass message unique identifiers instead of numbers.
      *
      * @return array
      */
-    public function overview($sequence, $uid = false) {
-        return \imap_fetch_overview($this->stream, $sequence,$uid ? IMAP::FT_UID : IMAP::NIL);
+    public function overview($sequence, $uid = IMAP::ST_UID) {
+        return \imap_fetch_overview($this->stream, $sequence,$uid ? IMAP::ST_UID : IMAP::NIL);
     }
 
     /**
@@ -327,17 +338,17 @@ class LegacyProtocol extends Protocol {
      *                             last message, INF means last message available
      * @param string|null $mode '+' to add flags, '-' to remove flags, everything else sets the flags as given
      * @param bool $silent if false the return values are the new flags for the wanted messages
-     * @param bool $uid set to true if passing a unique id
+     * @param int $uid set to IMAP::ST_UID if you pass message unique identifiers instead of numbers.
      *
      * @return bool|array new flags if $silent is false, else true or false depending on success
      */
-    public function store(array $flags, $from, $to = null, $mode = null, $silent = true, $uid = false) {
+    public function store(array $flags, $from, $to = null, $mode = null, $silent = true, $uid = IMAP::ST_UID) {
         $flag = trim(is_array($flags) ? implode(" ", $flags) : $flags);
 
         if ($mode == "+"){
-            $status = \imap_setflag_full($this->stream, $from, $flag, $uid ? IMAP::FT_UID : IMAP::NIL);
+            $status = \imap_setflag_full($this->stream, $from, $flag, $uid ? IMAP::ST_UID : IMAP::NIL);
         }else{
-            $status = \imap_clearflag_full($this->stream, $from, $flag, $uid ? IMAP::FT_UID : IMAP::NIL);
+            $status = \imap_clearflag_full($this->stream, $from, $flag, $uid ? IMAP::ST_UID : IMAP::NIL);
         }
 
         if ($silent === true) {
@@ -373,12 +384,30 @@ class LegacyProtocol extends Protocol {
      * @param $from
      * @param int|null $to if null only one message ($from) is fetched, else it's the
      *                         last message, INF means last message available
-     * @param bool $uid set to true if passing a unique id
+     * @param int $uid set to IMAP::ST_UID if you pass message unique identifiers instead of numbers.
      *
      * @return bool success
      */
-    public function copyMessage($folder, $from, $to = null, $uid = false) {
-        return \imap_mail_copy($this->stream, $from, $folder, $uid ? IMAP::FT_UID : IMAP::NIL);
+    public function copyMessage($folder, $from, $to = null, $uid = IMAP::ST_UID) {
+        return \imap_mail_copy($this->stream, $from, $folder, $uid ? IMAP::ST_UID : IMAP::NIL);
+    }
+
+    /**
+     * Copy multiple messages to the target folder
+     * @param array<string> $messages List of message identifiers
+     * @param string $folder Destination folder
+     * @param int $uid set to IMAP::ST_UID if you pass message unique identifiers instead of numbers.
+     *
+     * @return array|bool Tokens if operation successful, false if an error occurred
+     */
+    public function copyManyMessages($messages, $folder, $uid = IMAP::ST_UID) {
+        foreach($messages as $msg) {
+            if ($this->copyMessage($folder, $msg, null, $uid) == false) {
+                return false;
+            }
+        }
+
+        return $messages;
     }
 
     /**
@@ -387,12 +416,43 @@ class LegacyProtocol extends Protocol {
      * @param $from
      * @param int|null $to if null only one message ($from) is fetched, else it's the
      *                         last message, INF means last message available
-     * @param bool $uid set to true if passing a unique id
+     * @param int $uid set to IMAP::ST_UID if you pass message unique identifiers instead of numbers.
      *
      * @return bool success
      */
-    public function moveMessage($folder, $from, $to = null, $uid = false) {
-        return \imap_mail_move($this->stream, $from, $folder, $uid ? IMAP::FT_UID : IMAP::NIL);
+    public function moveMessage($folder, $from, $to = null, $uid = IMAP::ST_UID) {
+        return \imap_mail_move($this->stream, $from, $folder, $uid ? IMAP::ST_UID : IMAP::NIL);
+    }
+
+    /**
+     * Move multiple messages to the target folder
+     * @param array<string> $messages List of message identifiers
+     * @param string $folder Destination folder
+     * @param int $uid set to IMAP::ST_UID if you pass message unique identifiers instead of numbers.
+     *
+     * @return array|bool Tokens if operation successful, false if an error occurred
+     */
+    public function moveManyMessages($messages, $folder, $uid = IMAP::ST_UID) {
+        foreach($messages as $msg) {
+            if ($this->moveMessage($folder, $msg, null, $uid) == false) {
+                return false;
+            }
+        }
+
+        return $messages;
+    }
+
+    /**
+     * Exchange identification information
+     * Ref.: https://datatracker.ietf.org/doc/html/rfc2971
+     *
+     * @param null $ids
+     * @return array|bool|void|null
+     *
+     * @throws MethodNotSupportedException
+     */
+    public function ID($ids = null) {
+        throw new MethodNotSupportedException();
     }
 
     /**
@@ -484,12 +544,13 @@ class LegacyProtocol extends Protocol {
 
     /**
      * Search for matching messages
-     *
      * @param array $params
+     * @param int $uid set to IMAP::ST_UID if you pass message unique identifiers instead of numbers.
+     *
      * @return array message ids
      */
-    public function search(array $params, $uid = false) {
-        return \imap_search($this->stream, $params[0], $uid ? IMAP::FT_UID : IMAP::NIL);
+    public function search(array $params, $uid = IMAP::ST_UID) {
+        return \imap_search($this->stream, $params[0], $uid ? IMAP::ST_UID : IMAP::NIL);
     }
 
     /**

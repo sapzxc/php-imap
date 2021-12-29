@@ -13,6 +13,7 @@
 namespace Webklex\PHPIMAP\Connection\Protocols;
 
 use Webklex\PHPIMAP\Exceptions\ConnectionFailedException;
+use Webklex\PHPIMAP\IMAP;
 
 /**
  * Class Protocol
@@ -47,12 +48,6 @@ abstract class Protocol implements ProtocolInterface {
      * @var bool
      */
     protected $cert_validation = true;
-
-    /**
-     * Peer name for fix SSL checks when connecting by IP
-     * @var null|string
-     */
-    protected $peer_name = null;
 
     /**
      * Proxy settings
@@ -125,22 +120,6 @@ abstract class Protocol implements ProtocolInterface {
     }
 
     /**
-     * @param $peer_name
-     * @return $this
-     */
-    public function setPeerName($peer_name) {
-        $this->peer_name = $peer_name;
-        return $this;
-    }
-
-    /**
-     * @return string|null
-     */
-    public function getPeerName() {
-        return $this->peer_name;
-    }
-
-    /**
      * Set connection proxy settings
      * @var array $options
      *
@@ -193,11 +172,6 @@ abstract class Protocol implements ProtocolInterface {
             }
         }
 
-        if($this->peer_name)
-        {
-            $options['ssl']['peer_name'] = $this->getPeerName();
-        }
-
         return $options;
     }
 
@@ -210,7 +184,6 @@ abstract class Protocol implements ProtocolInterface {
      *
      * @return resource|boolean The socket created.
      * @throws ConnectionFailedException
-     * @throws \ErrorException
      */
     protected function createStream($transport, $host, $port, $timeout) {
         $socket = "$transport://$host:$port";
@@ -218,10 +191,9 @@ abstract class Protocol implements ProtocolInterface {
             STREAM_CLIENT_CONNECT,
             stream_context_create($this->defaultSocketOptions($transport))
         );
-        stream_set_timeout($stream, $timeout);
 
         if (!$stream) {
-            throw new ConnectionFailedException("Failed to connect to host", 0);
+            throw new ConnectionFailedException($errstr, $errno);
         }
 
         if (false === stream_set_timeout($stream, $timeout)) {
@@ -247,6 +219,27 @@ abstract class Protocol implements ProtocolInterface {
             $this->connection_timeout = $connection_timeout;
         }
         return $this;
+    }
+
+    /**
+     * Get the UID key string
+     * @param int|string $uid
+     *
+     * @return string
+     */
+    public function getUIDKey($uid) {
+        if ($uid == IMAP::ST_UID || $uid == IMAP::FT_UID) {
+            return "UID";
+        }
+        if (strlen($uid) > 0 && !is_numeric($uid)) {
+            return (string)$uid;
+        }
+
+        return "";
+    }
+
+    public function buildUIDCommand($command, $uid) {
+        return trim($this->getUIDKey($uid)." ".$command);
     }
 
 }
