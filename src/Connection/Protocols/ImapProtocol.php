@@ -134,7 +134,12 @@ class ImapProtocol extends Protocol {
      */
     protected function nextTaggedLine(&$tag) {
         $line = $this->nextLine();
-        list($tag, $line) = explode(' ', $line, 2);
+        $result = explode(' ', $line, 2);
+        if(count($result) == 2) {
+            list($tag, $line) = $result;
+        } else {
+            $tag = '';
+        }
 
         return $line;
     }
