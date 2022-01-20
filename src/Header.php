@@ -739,6 +739,25 @@ class Header {
                             $array = array_reverse($array);
                             $date = trim(array_pop($array));
                             break;
+                        case preg_match('/^(?<dm1>[0-9]{2})-(?<dm2>[0-9]{2})-(?<y>[0-9]{4})$/', $date, $matches):
+                        case preg_match('/^(?<y>[0-9]{4})-(?<dm2>[0-9]{2})-(?<dm1>[0-9]{2})$/', $date, $matches):
+                            if ($matches['dm2'] > 12) {
+                                $date = Carbon::create($matches['y'], $matches['dm1'], $matches['dm2']);
+                            }
+                            elseif ($matches['dm1'] > 12) {
+                                $date = Carbon::create($matches['y'], $matches['dm2'], $matches['dm1']);
+                            }
+                            // extract date from header->received[]
+                            elseif (property_exists($header, 'received')) {
+                                foreach ($header->received as $record) {
+                                    if (preg_match('/^[0-9]{1,2}\ [A-Z]{2,3}\ [0-9]{4}/i', $date)) {
+                                        $date = $record;
+                                        break;
+                                    }
+                                }
+                                
+                            }
+                            break;
                     }
                     try{
                         $parsed_date = Carbon::parse($date);
