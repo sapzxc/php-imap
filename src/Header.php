@@ -705,41 +705,59 @@ class Header {
     private function parseDate($header) {
 
         if (property_exists($header, 'date')) {
-            $parsed_date = null;
-            $date = $header->date;
+            $parsed_date_result = null;
+            $dates = $header->date;
 
-            if(preg_match('/\+0580/', $date)) {
-                $date = str_replace('+0580', '+0530', $date);
+            if(!is_array($dates))
+            {
+                $dates = [$dates];
             }
 
-            $date = trim(rtrim($date));
-            try {
-                $parsed_date = Carbon::parse($date);
-            } catch (\Exception $e) {
-                switch (true) {
-                    case preg_match('/([0-9]{1,2}\ [A-Z]{2,3}\ [0-9]{4}\ [0-9]{1,2}\:[0-9]{1,2}\:[0-9]{1,2}\ UT)+$/i', $date) > 0:
-                    case preg_match('/([A-Z]{2,3}\,\ [0-9]{1,2}\ [A-Z]{2,3}\ [0-9]{4}\ [0-9]{1,2}\:[0-9]{1,2}\:[0-9]{1,2}\ UT)+$/i', $date) > 0:
-                        $date .= 'C';
-                        break;
-                    case preg_match('/([A-Z]{2,3}\,\ [0-9]{1,2}\ [A-Z]{2,3}\ [0-9]{4}\ [0-9]{1,2}\:[0-9]{1,2}\:[0-9]{1,2}\ \+[0-9]{2,4}\ \(\+[0-9]{1,2}\))+$/i', $date) > 0:
-                    case preg_match('/([A-Z]{2,3}[\,|\ \,]\ [0-9]{1,2}\ [A-Z]{2,3}\ [0-9]{4}\ [0-9]{1,2}\:[0-9]{1,2}\:[0-9]{1,2}.*)+$/i', $date) > 0:
-                    case preg_match('/([A-Z]{2,3}\,\ [0-9]{1,2}\ [A-Z]{2,3}\ [0-9]{4}\ [0-9]{1,2}\:[0-9]{1,2}\:[0-9]{1,2}\ [\-|\+][0-9]{4}\ \(.*)\)+$/i', $date) > 0:
-                    case preg_match('/([A-Z]{2,3}\, \ [0-9]{1,2}\ [A-Z]{2,3}\ [0-9]{4}\ [0-9]{1,2}\:[0-9]{1,2}\:[0-9]{1,2}\ [\-|\+][0-9]{4}\ \(.*)\)+$/i', $date) > 0:
-                    case preg_match('/([0-9]{1,2}\ [A-Z]{2,3}\ [0-9]{2,4}\ [0-9]{2}\:[0-9]{2}\:[0-9]{2}\ [A-Z]{2}\ \-[0-9]{2}\:[0-9]{2}\ \([A-Z]{2,3}\ \-[0-9]{2}:[0-9]{2}\))+$/i', $date) > 0:
-                        $array = explode('(', $date);
-                        $array = array_reverse($array);
-                        $date = trim(array_pop($array));
-                        break;
+            $parsed_unix_ts = null;
+            foreach($dates as $date)
+            {
+                $parsed_date = null;
+                if(preg_match('/\+0580/', $date)) {
+                    $date = str_replace('+0580', '+0530', $date);
                 }
-                try{
+
+                $date = trim(rtrim($date));
+                try {
                     $parsed_date = Carbon::parse($date);
-                } catch (\Exception $_e) {
-                    $error_message = "Invalid message date. ID:".$this->get("message_id")." Date:".$header->date."/".$date;
-                    throw new InvalidMessageDateException($error_message, 1100, $e);
+                } catch (\Exception $e) {
+                    switch (true) {
+                        case preg_match('/([0-9]{1,2}\ [A-Z]{2,3}\ [0-9]{4}\ [0-9]{1,2}\:[0-9]{1,2}\:[0-9]{1,2}\ UT)+$/i', $date) > 0:
+                        case preg_match('/([A-Z]{2,3}\,\ [0-9]{1,2}\ [A-Z]{2,3}\ [0-9]{4}\ [0-9]{1,2}\:[0-9]{1,2}\:[0-9]{1,2}\ UT)+$/i', $date) > 0:
+                            $date .= 'C';
+                            break;
+                        case preg_match('/([A-Z]{2,3}\,\ [0-9]{1,2}\ [A-Z]{2,3}\ [0-9]{4}\ [0-9]{1,2}\:[0-9]{1,2}\:[0-9]{1,2}\ \+[0-9]{2,4}\ \(\+[0-9]{1,2}\))+$/i', $date) > 0:
+                        case preg_match('/([A-Z]{2,3}[\,|\ \,]\ [0-9]{1,2}\ [A-Z]{2,3}\ [0-9]{4}\ [0-9]{1,2}\:[0-9]{1,2}\:[0-9]{1,2}.*)+$/i', $date) > 0:
+                        case preg_match('/([A-Z]{2,3}\,\ [0-9]{1,2}\ [A-Z]{2,3}\ [0-9]{4}\ [0-9]{1,2}\:[0-9]{1,2}\:[0-9]{1,2}\ [\-|\+][0-9]{4}\ \(.*)\)+$/i', $date) > 0:
+                        case preg_match('/([A-Z]{2,3}\, \ [0-9]{1,2}\ [A-Z]{2,3}\ [0-9]{4}\ [0-9]{1,2}\:[0-9]{1,2}\:[0-9]{1,2}\ [\-|\+][0-9]{4}\ \(.*)\)+$/i', $date) > 0:
+                        case preg_match('/([0-9]{1,2}\ [A-Z]{2,3}\ [0-9]{2,4}\ [0-9]{2}\:[0-9]{2}\:[0-9]{2}\ [A-Z]{2}\ \-[0-9]{2}\:[0-9]{2}\ \([A-Z]{2,3}\ \-[0-9]{2}:[0-9]{2}\))+$/i', $date) > 0:
+                            $array = explode('(', $date);
+                            $array = array_reverse($array);
+                            $date = trim(array_pop($array));
+                            break;
+                    }
+                    try{
+                        $parsed_date = Carbon::parse($date);
+                    } catch (\Exception $_e) {
+                        $error_message = "Invalid message date. ID:".$this->get("message_id")." Date:".$header->date."/".$date;
+                        throw new InvalidMessageDateException($error_message, 1100, $e);
+                    }
                 }
+
+                // get "first" date of message, because another might be re-send dates
+                $parsed_unix_ts_this = strtotime($parsed_date);
+                if(is_null($parsed_unix_ts) || $parsed_unix_ts > $parsed_unix_ts_this) {
+                    $parsed_unix_ts = $parsed_unix_ts_this;
+                    $parsed_date_result = $parsed_date;
+                }
+                $parsed_dates[] = $parsed_date;
             }
 
-            $this->set("date", $parsed_date);
+            $this->set("date", $parsed_date_result);
         }
     }
 
